@@ -4,7 +4,7 @@
   <name>imgui_app</name>
   <version>1.0.0</version>
   <description>ImGui visualization GUI for OV2SLAM</description>
-  <maintainer email="you@example.com">Your Name</maintainer>
+  <maintainer email="szymon.markowski@powertrain.com">Szymon</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
