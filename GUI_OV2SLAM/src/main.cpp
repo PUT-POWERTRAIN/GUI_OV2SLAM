@@ -22,7 +22,7 @@ public:
         std::string vo_pose_topic = this->get_parameter("vo_pose_topic").as_string();
          
         pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-            "/vo_pose", 10,
+    vo_pose_topic, 10, 
             std::bind(&ImGuiVisualizerNode::poseCallback, this, std::placeholders::_1));
 
         RCLCPP_INFO(this->get_logger(), "ImGui Visualizer Node started!");
