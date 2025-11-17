@@ -40,14 +40,12 @@ WORKDIR /ws/src/imgui_app/Thirdparty
 RUN git clone https://github.com/ocornut/imgui.git
 WORKDIR /ws/src/imgui_app/Thirdparty/imgui
 RUN git checkout docking
-# ImGui to header-only library, nie wymaga kompilacji
 
 ##################
 ### ImPlot     ###
 ##################
 WORKDIR /ws/src/imgui_app/Thirdparty
 RUN git clone https://github.com/epezent/implot.git
-# ImPlot również header-only
 
 ###################
 ### GLM (math)  ###
@@ -70,11 +68,14 @@ RUN apt update \
         ros-${ROS_DISTRO}-tf2 \
         ros-${ROS_DISTRO}-tf2-ros \
         ros-${ROS_DISTRO}-tf2-geometry-msgs \
-        ros-${ROS_DISTRO}-image-transport \
         ros-${ROS_DISTRO}-cv-bridge \
-        ros-${ROS_DISTRO}-pcl-ros \
-        ros-${ROS_DISTRO}-pcl-conversions \
-        ros-${ROS_DISTRO}-visualization-msgs \
+    && rm -rf /var/lib/apt/lists/*
+###################
+### OpenCV      ###
+###################
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ############################
