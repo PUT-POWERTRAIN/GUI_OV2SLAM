@@ -91,6 +91,9 @@ RUN apt-get update \
 ADD . /ws/src/imgui_app
 
 WORKDIR /ws
+
+RUN mkdir -p /ws/trajectories
+
 RUN . /opt/ros/$ROS_DISTRO/setup.sh && colcon build --symlink-install
 
 # Ustaw zmienne środowiskowe dla X11

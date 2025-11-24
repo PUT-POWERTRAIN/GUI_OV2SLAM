@@ -13,7 +13,8 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
-#include <deque>
+#include <fstream>
+#include <chrono>
 
 class ImGuiVisualizerNode : public rclcpp::Node
 {
@@ -36,7 +37,7 @@ public:
 
         RCLCPP_INFO(this->get_logger(), "ImGui Visualizer Node started!");
     }
-
+  
     float getCameraX() const { return camera_x_; }
     float getCameraY() const { return camera_y_; }
     float getCameraZ() const { return camera_z_; }
@@ -50,6 +51,25 @@ public:
     
     const std::vector<float>& getTrajectoryX() const { return trajectory_x_; }
     const std::vector<float>& getTrajectoryZ() const { return trajectory_z_; }
+    
+    
+    void saveTrajectoryToCSV(const std::string& filename)
+    {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to open file: %s", filename.c_str());
+            return;
+        }
+        
+        file << "x,z,time_stamp\n";
+        for (size_t i = 0; i < trajectory_x_.size(); ++i) {
+            file << trajectory_x_[i] << "," << trajectory_z_[i] <<","<< std::to_string(std::chrono::system_clock::now().time_since_epoch().count())<<"\n";
+        }
+        
+        file.close();
+        RCLCPP_INFO(this->get_logger(), "Trajectory saved to: %s (%zu points)", 
+                    filename.c_str(), trajectory_x_.size());
+    }
 
 private:
     void poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -133,7 +153,9 @@ private:
     // Trajectory
     std::vector<float> trajectory_x_;
     std::vector<float> trajectory_z_;
-
+    std::vector<float> sec;
+    std::vector<float> nanosec;
+    
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
 };
@@ -152,7 +174,7 @@ int main(int argc, char** argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, "OV2SLAM Visualizer", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, "OV2SLAM PowerVisualizer", NULL, NULL);
     if (window == NULL) {
         std::cerr << "Failed to create GLFW window" << std::endl;
         glfwTerminate();
@@ -215,6 +237,16 @@ int main(int argc, char** argv)
         const auto& traj_x = node->getTrajectoryX();
         const auto& traj_z = node->getTrajectoryZ();
         
+        // Przycisk zapisu trajektorii
+        if (ImGui::Button("Save Trajectory to CSV")) {
+            std::string filename = "/ws/trajectories/trajectory_" + 
+                std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + 
+                ".csv";
+            node->saveTrajectoryToCSV(filename);
+        }
+        ImGui::SameLine();
+        ImGui::Text("Points: %zu", traj_x.size());
+        
         if (traj_x.size() > 1) {
             if (ImPlot::BeginPlot("Camera Trajectory (Top View)", ImVec2(-1, -1))) {
                 ImPlot::SetupAxis(ImAxis_X1, "X [m]");
@@ -258,4 +290,4 @@ int main(int argc, char** argv)
 
     rclcpp::shutdown();
     return 0;
-}g
+}
