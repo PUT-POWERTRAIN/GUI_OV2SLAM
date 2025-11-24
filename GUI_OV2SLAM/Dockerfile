@@ -70,6 +70,13 @@ RUN apt update \
         ros-${ROS_DISTRO}-tf2-geometry-msgs \
         ros-${ROS_DISTRO}-cv-bridge \
     && rm -rf /var/lib/apt/lists/*
+######################
+### Cyclone DDS    ###
+######################
+RUN apt update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    && rm -rf /var/lib/apt/lists/*
 ###################
 ### OpenCV      ###
 ###################
@@ -93,6 +100,10 @@ ENV QT_X11_NO_MITSHM=1
 # Source ROS setup
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /ws/install/setup.bash" >> ~/.bashrc
+
+# Ustaw Cyclone DDS jako domyślny
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
 
 WORKDIR /ws
 

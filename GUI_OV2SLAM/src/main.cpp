@@ -13,6 +13,7 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <deque>
 
 class ImGuiVisualizerNode : public rclcpp::Node
 {
@@ -46,6 +47,9 @@ public:
     GLuint getImageTexture() const { return image_texture_; }
     int getImageWidth() const { return image_width_; }
     int getImageHeight() const { return image_height_; }
+    
+    const std::vector<float>& getTrajectoryX() const { return trajectory_x_; }
+    const std::vector<float>& getTrajectoryZ() const { return trajectory_z_; }
 
 private:
     void poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -73,6 +77,10 @@ private:
         camera_x_ = msg->pose.position.x;
         camera_y_ = msg->pose.position.y;
         camera_z_ = msg->pose.position.z;
+        
+        // Dodaj punkt do trajektorii
+        trajectory_x_.push_back(camera_x_);
+        trajectory_z_.push_back(camera_z_);
     }
 
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
@@ -121,6 +129,10 @@ private:
     GLuint image_texture_ = 0;
     int image_width_ = 0;
     int image_height_ = 0;
+
+    // Trajectory
+    std::vector<float> trajectory_x_;
+    std::vector<float> trajectory_z_;
 
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
@@ -174,6 +186,7 @@ int main(int argc, char** argv)
 
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
+        // Okno z pozycją kamery
         ImGui::Begin("Camera Position");
         ImGui::Text("Position:");
         ImGui::Text("  X: %.3f m", node->getCameraX());
@@ -186,13 +199,42 @@ int main(int argc, char** argv)
         ImGui::Text("Distance:");
         ImGui::Text("  Linear: %.3f m", node->getDistanceLinear());
         ImGui::End();
-        // Nowe okno z obrazem
+        
+        // Okno z obrazem
         ImGui::Begin("Image Track");
         if (node->hasImage()) {
             ImVec2 imageSize(node->getImageWidth(), node->getImageHeight());
             ImGui::Image((void*)(intptr_t)node->getImageTexture(), imageSize);
         } else {
             ImGui::Text("Waiting for image...");
+        }
+        ImGui::End();
+
+        // Okno z trajektorią XZ
+        ImGui::Begin("Trajectory XZ");
+        const auto& traj_x = node->getTrajectoryX();
+        const auto& traj_z = node->getTrajectoryZ();
+        
+        if (traj_x.size() > 1) {
+            if (ImPlot::BeginPlot("Camera Trajectory (Top View)", ImVec2(-1, -1))) {
+                ImPlot::SetupAxis(ImAxis_X1, "X [m]");
+                ImPlot::SetupAxis(ImAxis_Y1, "Z [m]");
+                ImPlot::SetupAxisLimits(ImAxis_X1, -50, 50, ImGuiCond_Once);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, -50, 50, ImGuiCond_Once);
+                
+                ImPlot::PlotLine("Path", traj_x.data(), traj_z.data(), traj_x.size());
+                
+                // Rysuj aktualną pozycję jako punkt
+                if (!traj_x.empty()) {
+                    float current_x = traj_x.back();
+                    float current_z = traj_z.back();
+                    ImPlot::PlotScatter("Current", &current_x, &current_z, 1);
+                }
+                
+                ImPlot::EndPlot();
+            }
+        } else {
+            ImGui::Text("Collecting trajectory data...");
         }
         ImGui::End();
 
@@ -216,4 +258,4 @@ int main(int argc, char** argv)
 
     rclcpp::shutdown();
     return 0;
-}
+}g
