@@ -40,6 +40,9 @@ WORKDIR /ws/src/imgui_app/Thirdparty
 RUN git clone https://github.com/ocornut/imgui.git
 WORKDIR /ws/src/imgui_app/Thirdparty/imgui
 RUN git checkout docking
+##############
+### Logo #####
+##############
 
 ##################
 ### ImPlot     ###
@@ -91,6 +94,8 @@ RUN apt-get update \
 ADD . /ws/src/imgui_app
 
 WORKDIR /ws
+
+COPY logo.png /ws/src/imgui_app/logo.png
 
 RUN mkdir -p /ws/trajectories
 
