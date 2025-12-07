@@ -1,6 +1,6 @@
 # GUI_OV2SLAM
 PowerViz to aplikacja GUI pozwalająca na żywo wizualizować mi.n parametry takie jak pozycja, prędkość, obraz, trajektora czy chmura punktów z $OV^2SLAM$
-<img width="1785" height="978" alt="Screenshot from 2025-12-04 20-28-15" src="https://github.com/user-attachments/assets/7b67b4fd-a93a-48b1-973f-b52cd9f9724b" />
+<img width="1786" height="977" alt="Screenshot from 2025-12-07 16-40-43" src="https://github.com/user-attachments/assets/1da78d87-56bf-4f75-b3cb-b1d9bd3a27a8" />
 ## Uruchomienie
 Na początku pobieramy repozytorium
 ```bash
