@@ -5,7 +5,6 @@
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 
-
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -25,7 +24,7 @@
 #include <algorithm>
 #include <cstring>
 
-// --- SHADERY DLA OKNA 3D  ---
+// --- SHADERY DLA POINT CLOUD ---
 const char* viz_vertex_shader = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
@@ -68,7 +67,6 @@ void main() {
 }
 )";
 
-
 GLuint createShaderProgram(const char* vSrc, const char* fSrc) {
     GLuint v = glCreateShader(GL_VERTEX_SHADER); glShaderSource(v, 1, &vSrc, NULL); glCompileShader(v);
     GLuint f = glCreateShader(GL_FRAGMENT_SHADER); glShaderSource(f, 1, &fSrc, NULL); glCompileShader(f);
@@ -77,6 +75,48 @@ GLuint createShaderProgram(const char* vSrc, const char* fSrc) {
     return p;
 }
 
+// --- STRUKTURA KAMERY 3D ---
+struct Camera3D {
+    float yaw = 135.0f, pitch = 30.0f, dist = 50.0f;
+    float target[3] = {0,0,0};
+    bool dragging = false, panning = false;
+    double lx=0, ly=0;
+    ImVec2 last_mouse_pos;
+    bool mouse_over_window = false;
+
+    void update(ImVec2 mouse_pos, bool left_down, bool right_down, ImVec2 mouse_delta) {
+        // Obrót (LPM)
+        if(left_down && mouse_over_window) {
+            yaw += mouse_delta.x * 0.5f;
+            pitch += mouse_delta.y * 0.5f;
+            pitch = std::max(-89.0f, std::min(89.0f, pitch));
+        }
+
+        // Przesuwanie (PPM)
+        if(right_down && mouse_over_window) {
+            float dx = mouse_delta.x * 0.05f;
+            float dy = mouse_delta.y * 0.05f;
+            float rad = glm::radians(yaw);
+            target[0] -= (dx * cos(rad) - dy * sin(rad));
+            target[2] -= (dx * sin(rad) + dy * cos(rad));
+        }
+    }
+    
+    void scroll(float delta) {
+        if(mouse_over_window) {
+            dist -= delta * 2.0f;
+            if(dist < 0.1f) dist = 0.1f;
+        }
+    }
+    
+    glm::mat4 getView() {
+        float ry = glm::radians(yaw), rp = glm::radians(pitch);
+        float cx = target[0] + dist * cos(rp) * sin(ry);
+        float cy = target[1] + dist * sin(rp);
+        float cz = target[2] + dist * cos(rp) * cos(ry);
+        return glm::lookAt(glm::vec3(cx,cy,cz), glm::vec3(target[0],target[1],target[2]), glm::vec3(0,1,0));
+    }
+};
 
 class ImGuiVisualizerNode : public rclcpp::Node
 {
@@ -114,7 +154,7 @@ public:
     float getDistanceLinear() const { return distance_linear_; }
     
     bool hasImage() const { return has_image_; }
-    // Texture ID 
+    
     void updateImageTexture() {
         if(has_new_image_ && !current_image_mat_.empty()) {
              if (image_texture_ == 0) {
@@ -129,6 +169,7 @@ public:
             has_new_image_ = false;
         }
     }
+    
     GLuint getImageTexture() const { return image_texture_; }
     int getImageWidth() const { return image_width_; }
     int getImageHeight() const { return image_height_; }
@@ -179,12 +220,12 @@ public:
     }
 
     // Point Cloud Data Access
-    std::vector<float> cloud_points_buffer; // x,y,z flat
-    std::vector<float> cloud_colors_buffer; // r,g,b flat
+    std::vector<float> cloud_points_buffer;
+    std::vector<float> cloud_colors_buffer;
     bool new_cloud_available = false;
     size_t getCloudSize() const { return cloud_points_buffer.size() / 3; }
     
-    float center_x=0, center_y=0, center_z=0; // Centrum chmury
+    float center_x=0, center_y=0, center_z=0;
 
 private:
     void poseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
@@ -222,7 +263,6 @@ private:
     }
     
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
-        // Parsing danych bezpośrednio do bufora dla OpenGL
         int x_off=-1, y_off=-1, z_off=-1, rgb_off=-1;
         for(const auto& f : msg->fields) {
             if(f.name=="x") x_off=f.offset;
@@ -269,23 +309,19 @@ private:
         new_cloud_available = true;
     }
 
-    // Zmienne
     float camera_x_ = 0, camera_y_ = 0, camera_z_ = 0;
     float velocity_linear_ = 0, distance_linear_ = 0;
     rclcpp::Time last_pose_time_ = rclcpp::Time(0);
     float last_x_ = 0, last_y_ = 0, last_z_ = 0;
     
-    // Image
     bool has_image_ = false;
     bool has_new_image_ = false;
     cv::Mat current_image_mat_;
     GLuint image_texture_ = 0;
     int image_width_ = 0, image_height_ = 0;
 
-    // Trajectory
     std::vector<float> trajectory_x_, trajectory_z_;
     
-    // Logo
     bool has_logo_ = false;
     GLuint logo_texture_ = 0;
     int logo_width_ = 0, logo_height_ = 0;
@@ -297,52 +333,152 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
 };
 
-// --- STRUKTURA KAMERY DLA OKNA 3D ---
-struct Camera3D {
-    float yaw = -45.0f, pitch = 30.0f, dist = 50.0f;
-    float target[3] = {0,0,0};
-    bool dragging = false, panning = false;
-    double lx=0, ly=0;
-
-    void update(GLFWwindow* win) {
-        double mx, my; glfwGetCursorPos(win, &mx, &my);
+// --- KLASA DO RENDEROWANIA POINT CLOUD DO TEKSTURY ---
+class PointCloudRenderer {
+public:
+    PointCloudRenderer() {}
+    
+    bool init(int width, int height) {
+        width_ = width;
+        height_ = height;
         
-        // Obrót (LPM)
-        if(glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-            if(!dragging) { dragging=true; lx=mx; ly=my; }
-            yaw += (float)(mx - lx) * 0.5f;
-            pitch += (float)(my - ly) * 0.5f;
-            pitch = std::max(-89.0f, std::min(89.0f, pitch));
-            lx=mx; ly=my;
-        } else dragging=false;
-
-        // Przesuwanie (PPM)
-        if(glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
-            if(!panning) { panning=true; lx=mx; ly=my; }
-            float dx = (float)(mx - lx) * 0.05f;
-            float dy = (float)(my - ly) * 0.05f;
-            float rad = glm::radians(yaw);
-            target[0] -= (dx * cos(rad) - dy * sin(rad));
-            target[2] -= (dx * sin(rad) + dy * cos(rad));
-            lx=mx; ly=my;
-        } else panning=false;
+        // Shadery
+        prog_viz_ = createShaderProgram(viz_vertex_shader, viz_fragment_shader);
+        prog_grid_ = createShaderProgram(grid_vertex_shader, grid_fragment_shader);
+        
+        // VAO/VBO dla punktów
+        glGenVertexArrays(1, &vao_pts_);
+        glGenBuffers(1, &vbo_pts_);
+        glGenBuffers(1, &cbo_pts_);
+        
+        // VAO/VBO dla siatki
+        glGenVertexArrays(1, &vao_grid_);
+        std::vector<float> gridV;
+        int gSize = 100;
+        for(int i=-gSize; i<=gSize; i+=5) {
+            gridV.push_back(i); gridV.push_back(0); gridV.push_back(-gSize);
+            gridV.push_back(i); gridV.push_back(0); gridV.push_back(gSize);
+            gridV.push_back(-gSize); gridV.push_back(0); gridV.push_back(i);
+            gridV.push_back(gSize); gridV.push_back(0); gridV.push_back(i);
+        }
+        glGenBuffers(1, &vbo_grid_);
+        glBindVertexArray(vao_grid_);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_grid_);
+        glBufferData(GL_ARRAY_BUFFER, gridV.size()*sizeof(float), gridV.data(), GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray(0);
+        grid_vertices_ = gridV.size() / 3;
+        
+        // Framebuffer i tekstura
+        glGenFramebuffers(1, &fbo_);
+        glGenTextures(1, &texture_);
+        glGenRenderbuffers(1, &rbo_depth_);
+        
+        resize(width, height);
+        
+        return true;
     }
     
-    glm::mat4 getView() {
-        float ry = glm::radians(yaw), rp = glm::radians(pitch);
-        float cx = target[0] + dist * cos(rp) * sin(ry);
-        float cy = target[1] + dist * sin(rp);
-        float cz = target[2] + dist * cos(rp) * cos(ry);
-        return glm::lookAt(glm::vec3(cx,cy,cz), glm::vec3(target[0],target[1],target[2]), glm::vec3(0,1,0));
+    void resize(int width, int height) {
+        width_ = width;
+        height_ = height;
+        
+        // Tekstura koloru
+        glBindTexture(GL_TEXTURE_2D, texture_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        
+        // Renderbuffer głębi
+        glBindRenderbuffer(GL_RENDERBUFFER, rbo_depth_);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width_, height_);
+        
+        // Framebuffer
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo_depth_);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
+    
+    void render(Camera3D& cam, ImGuiVisualizerNode* node) {
+        // Renderuj do framebuffera
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+        glViewport(0, 0, width_, height_);
+        glClearColor(0.15f, 0.15f, 0.15f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_PROGRAM_POINT_SIZE);
+        
+        glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)width_/height_, 0.1f, 10000.0f);
+        glm::mat4 view = cam.getView();
+        
+        // Rysuj siatkę
+        glUseProgram(prog_grid_);
+        glUniformMatrix4fv(glGetUniformLocation(prog_grid_, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+        glUniformMatrix4fv(glGetUniformLocation(prog_grid_, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        glBindVertexArray(vao_grid_);
+        glDrawArrays(GL_LINES, 0, grid_vertices_);
+        
+        // Aktualizuj dane punktów jeśli są nowe
+        if(node->new_cloud_available) {
+            glBindVertexArray(vao_pts_);
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_pts_);
+            glBufferData(GL_ARRAY_BUFFER, node->cloud_points_buffer.size()*4, 
+                         node->cloud_points_buffer.data(), GL_DYNAMIC_DRAW);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+            glEnableVertexAttribArray(0);
+            
+            glBindBuffer(GL_ARRAY_BUFFER, cbo_pts_);
+            glBufferData(GL_ARRAY_BUFFER, node->cloud_colors_buffer.size()*4, 
+                         node->cloud_colors_buffer.data(), GL_DYNAMIC_DRAW);
+            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+            glEnableVertexAttribArray(1);
+            
+            node->new_cloud_available = false;
+            
+            // Auto-center
+            if(cam.target[0]==0 && cam.target[1]==0) {
+                cam.target[0]=node->center_x;
+                cam.target[1]=node->center_y;
+                cam.target[2]=node->center_z;
+            }
+        }
+        
+        // Rysuj punkty
+        if(node->getCloudSize() > 0) {
+            glUseProgram(prog_viz_);
+            glUniformMatrix4fv(glGetUniformLocation(prog_viz_, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+            glUniformMatrix4fv(glGetUniformLocation(prog_viz_, "view"), 1, GL_FALSE, glm::value_ptr(view));
+            glBindVertexArray(vao_pts_);
+            glDrawArrays(GL_POINTS, 0, node->getCloudSize());
+        }
+        
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    
+    GLuint getTexture() const { return texture_; }
+    
+    ~PointCloudRenderer() {
+        if(fbo_) glDeleteFramebuffers(1, &fbo_);
+        if(texture_) glDeleteTextures(1, &texture_);
+        if(rbo_depth_) glDeleteRenderbuffers(1, &rbo_depth_);
+        if(vao_pts_) glDeleteVertexArrays(1, &vao_pts_);
+        if(vbo_pts_) glDeleteBuffers(1, &vbo_pts_);
+        if(cbo_pts_) glDeleteBuffers(1, &cbo_pts_);
+        if(vao_grid_) glDeleteVertexArrays(1, &vao_grid_);
+        if(vbo_grid_) glDeleteBuffers(1, &vbo_grid_);
+        if(prog_viz_) glDeleteProgram(prog_viz_);
+        if(prog_grid_) glDeleteProgram(prog_grid_);
+    }
+
+private:
+    GLuint fbo_ = 0, texture_ = 0, rbo_depth_ = 0;
+    GLuint vao_pts_ = 0, vbo_pts_ = 0, cbo_pts_ = 0;
+    GLuint vao_grid_ = 0, vbo_grid_ = 0;
+    GLuint prog_viz_ = 0, prog_grid_ = 0;
+    int width_ = 800, height_ = 600;
+    int grid_vertices_ = 0;
 };
-
-Camera3D cam3d;
-void scroll_callback(GLFWwindow* w, double x, double y) {
-    cam3d.dist -= (float)y * 2.0f;
-    if(cam3d.dist < 0.1f) cam3d.dist = 0.1f;
-}
-
 
 int main(int argc, char** argv)
 {
@@ -354,46 +490,13 @@ int main(int argc, char** argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     
-    // 1. OKNO GUI
-    GLFWwindow* winGUI = glfwCreateWindow(1280, 800, "OV2SLAM PowerViz", NULL, NULL);
-    
-    // 2. OKNO 3D
-    GLFWwindow* win3D = glfwCreateWindow(1200, 900, "3D Point Cloud PowerView", NULL, NULL);
-    
-    if (!winGUI || !win3D) return -1;
+    GLFWwindow* window = glfwCreateWindow(1600, 1000, "OV2SLAM PowerViz", NULL, NULL);
+    if (!window) return -1;
 
-    // --- KONFIGURACJA OKNA 3D ---
-    glfwMakeContextCurrent(win3D);
+    glfwMakeContextCurrent(window);
     glewExperimental = GL_TRUE;
     glewInit();
-    glfwSetScrollCallback(win3D, scroll_callback);
     
-    // Shadery dla 3D
-    GLuint progViz = createShaderProgram(viz_vertex_shader, viz_fragment_shader);
-    GLuint progGrid = createShaderProgram(grid_vertex_shader, grid_fragment_shader);
-    
-    // VAO/VBO dla chmury punktów
-    GLuint vaoPts, vboPts, cboPts;
-    glGenVertexArrays(1, &vaoPts); glGenBuffers(1, &vboPts); glGenBuffers(1, &cboPts);
-    
-    // VAO/VBO dla siatki
-    GLuint vaoGrid; glGenVertexArrays(1, &vaoGrid);
-    std::vector<float> gridV;
-    int gSize=100;
-    for(int i=-gSize; i<=gSize; i+=5) {
-        gridV.push_back(i); gridV.push_back(0); gridV.push_back(-gSize);
-        gridV.push_back(i); gridV.push_back(0); gridV.push_back(gSize);
-        gridV.push_back(-gSize); gridV.push_back(0); gridV.push_back(i);
-        gridV.push_back(gSize); gridV.push_back(0); gridV.push_back(i);
-    }
-    GLuint vboGrid; glGenBuffers(1, &vboGrid);
-    glBindVertexArray(vaoGrid);
-    glBindBuffer(GL_ARRAY_BUFFER, vboGrid);
-    glBufferData(GL_ARRAY_BUFFER, gridV.size()*sizeof(float), gridV.data(), GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(0);
-
-    // --- KONFIGURACJA OKNA GUI ---
-    glfwMakeContextCurrent(winGUI);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
@@ -401,77 +504,26 @@ int main(int argc, char** argv)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui::StyleColorsDark();
-    ImGui_ImplGlfw_InitForOpenGL(winGUI, true);
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
     
-    // Ładowanie logo
     node->loadLogo("/ws/src/imgui_app/logo.png");
     
     ImGuiStyle& style = ImGui::GetStyle();
     style.Colors[ImGuiCol_WindowBg].w = 0.85f;
+    
+    // Inicjalizacja renderera Point Cloud
+    PointCloudRenderer pc_renderer;
+    pc_renderer.init(800, 600);
+    
+    Camera3D cam3d;
+    ImVec2 last_mouse_pos(0, 0);
 
-    while (!glfwWindowShouldClose(winGUI) && !glfwWindowShouldClose(win3D))
+    while (!glfwWindowShouldClose(window))
     {
         rclcpp::spin_some(node);
         glfwPollEvents();
 
-        // =========================================================
-        // 1. RENDEROWANIE OKNA POINT CLOUD
-        // =========================================================
-        glfwMakeContextCurrent(win3D);
-        cam3d.update(win3D);
-        
-        int w3, h3; glfwGetFramebufferSize(win3D, &w3, &h3);
-        glViewport(0, 0, w3, h3);
-        glClearColor(0.15f, 0.15f, 0.15f, 1.0f); 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glEnable(GL_DEPTH_TEST);
-        glEnable(GL_PROGRAM_POINT_SIZE);
-        
-        glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)w3/h3, 0.1f, 10000.0f);
-        glm::mat4 view = cam3d.getView();
-        
-        // Rysuj siatkę
-        glUseProgram(progGrid);
-        glUniformMatrix4fv(glGetUniformLocation(progGrid, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
-        glUniformMatrix4fv(glGetUniformLocation(progGrid, "view"), 1, GL_FALSE, glm::value_ptr(view));
-        glBindVertexArray(vaoGrid);
-        glDrawArrays(GL_LINES, 0, gridV.size()/3);
-        
-        // Rysuj punkty
-        if(node->new_cloud_available) {
-            glBindVertexArray(vaoPts);
-            glBindBuffer(GL_ARRAY_BUFFER, vboPts);
-            glBufferData(GL_ARRAY_BUFFER, node->cloud_points_buffer.size()*4, node->cloud_points_buffer.data(), GL_DYNAMIC_DRAW);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(0);
-            
-            glBindBuffer(GL_ARRAY_BUFFER, cboPts);
-            glBufferData(GL_ARRAY_BUFFER, node->cloud_colors_buffer.size()*4, node->cloud_colors_buffer.data(), GL_DYNAMIC_DRAW);
-            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0); glEnableVertexAttribArray(1);
-            node->new_cloud_available = false;
-            
-            // Auto-center 
-            if(cam3d.target[0]==0 && cam3d.target[1]==0) {
-                cam3d.target[0]=node->center_x; cam3d.target[1]=node->center_y; cam3d.target[2]=node->center_z;
-            }
-        }
-        
-        if(node->getCloudSize() > 0) {
-            glUseProgram(progViz);
-            glUniformMatrix4fv(glGetUniformLocation(progViz, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
-            glUniformMatrix4fv(glGetUniformLocation(progViz, "view"), 1, GL_FALSE, glm::value_ptr(view));
-            glBindVertexArray(vaoPts);
-            glDrawArrays(GL_POINTS, 0, node->getCloudSize());
-        }
-        
-        glfwSwapBuffers(win3D);
-
-        // =========================================================
-        // 2. RENDEROWANIE OKNA IMGUI
-        // =========================================================
-        glfwMakeContextCurrent(winGUI);
-        
-        // Aktualizuj teksturę obrazu (jeśli jest nowa klatka)
         node->updateImageTexture();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -484,7 +536,8 @@ int main(int argc, char** argv)
             ImGui::SetNextWindowSize(ImGui::GetMainViewport()->Size);
             ImGui::SetNextWindowBgAlpha(node->getLogoAlpha());
             ImGui::Begin("Background", nullptr, 
-                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
+                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | 
+                ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus);
             
             ImVec2 sz = ImGui::GetWindowSize();
             float lh = sz.y * node->getLogoScale();
@@ -492,14 +545,14 @@ int main(int argc, char** argv)
             float lw = lh * aspect;
             
             ImGui::SetCursorPos(ImVec2((sz.x - lw)*0.5f, (sz.y - lh)*0.5f));
-            // Naprawiony Image call z 6 argumentami
-            ImGui::Image((void*)(intptr_t)node->getLogoTexture(), ImVec2(lw, lh), ImVec2(0,0), ImVec2(1,1), ImVec4(1,1,1,1.0f), ImVec4(0,0,0,0));
+            ImGui::Image((void*)(intptr_t)node->getLogoTexture(), ImVec2(lw, lh), 
+                        ImVec2(0,0), ImVec2(1,1), ImVec4(1,1,1,1.0f), ImVec4(0,0,0,0));
             ImGui::End();
         }
 
         ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-        // Okno z pozycją kamery
+        // OKNO 1: POZYCJA KAMERY
         ImGui::Begin("Camera Position");
         ImGui::Text("Position:");
         ImGui::Text("  X: %.3f m", node->getCameraX());
@@ -512,7 +565,7 @@ int main(int argc, char** argv)
         ImGui::Text("Distance:");
         ImGui::Text("  Linear: %.3f m", node->getDistanceLinear());
         ImGui::Separator();
-        ImGui::Text("3D View Status:");
+        ImGui::Text("Point Cloud:");
         ImGui::Text("  Points: %zu", node->getCloudSize());
         ImGui::Text("  Center: %.1f %.1f %.1f", node->center_x, node->center_y, node->center_z);
         ImGui::End();
@@ -534,7 +587,6 @@ int main(int argc, char** argv)
         const auto& traj_x = node->getTrajectoryX();
         const auto& traj_z = node->getTrajectoryZ();
         
-        // Przycisk zapisu trajektorii
         if (ImGui::Button("Save Trajectory to CSV")) {
             std::string filename = "/ws/trajectories/trajectory_" + 
                 std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + 
@@ -553,7 +605,6 @@ int main(int argc, char** argv)
                 
                 ImPlot::PlotLine("Path", traj_x.data(), traj_z.data(), traj_x.size());
                 
-                // Rysuj aktualną pozycję jako punkt
                 if (!traj_x.empty()) {
                     float current_x = traj_x.back();
                     float current_z = traj_z.back();
@@ -567,15 +618,69 @@ int main(int argc, char** argv)
         }
         ImGui::End();
 
+        // OKNO 4: POINT CLOUD 3D
+        ImGui::Begin("3D Point Cloud View");
+        
+        ImVec2 region = ImGui::GetContentRegionAvail();
+        
+        // Sprawdź czy region jest prawidłowy (nie zerowy)
+        if(region.x > 50 && region.y > 50) {
+            pc_renderer.resize((int)region.x, (int)region.y);
+            
+            // Renderuj Point Cloud
+            pc_renderer.render(cam3d, node.get());
+            
+            // Wyświetl jako teksturę (INVISIBLE_BUTTON przechwytuje kliknięcia myszy)
+            ImGui::InvisibleButton("##pc_canvas", region);
+            ImVec2 p_min = ImGui::GetItemRectMin();
+            ImVec2 p_max = ImGui::GetItemRectMax();
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            draw_list->AddImage((void*)(intptr_t)pc_renderer.getTexture(), 
+                               p_min, p_max, ImVec2(0,1), ImVec2(1,0));
+            
+            // Sprawdź czy mysz jest nad obrazem
+            bool is_over_image = ImGui::IsItemHovered();
+            
+            cam3d.mouse_over_window = is_over_image;
+            
+            // Obsługa myszy - tylko gdy jest nad obrazem
+            ImVec2 mouse_pos = ImGui::GetMousePos();
+            if(is_over_image) {
+                ImVec2 mouse_delta(mouse_pos.x - last_mouse_pos.x, mouse_pos.y - last_mouse_pos.y);
+                bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+                bool right_down = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+                
+                cam3d.update(mouse_pos, left_down, right_down, mouse_delta);
+                
+                // Scroll dla zoomu
+                float wheel = ImGui::GetIO().MouseWheel;
+                if(wheel != 0.0f) {
+                    cam3d.scroll(wheel);
+                }
+            }
+            last_mouse_pos = mouse_pos;
+        } else {
+            // Okno jest za małe lub jeszcze się inicjalizuje
+            ImGui::Text("Resize window to view Point Cloud...");
+        }
+        
+        ImGui::Text("Controls:");
+        ImGui::BulletText("Left Mouse: Rotate");
+        ImGui::BulletText("Right Mouse: Pan");
+        ImGui::BulletText("Scroll: Zoom");
+        
+        ImGui::End();
+
         // RENDER GUI
         ImGui::Render();
-        int wg, hg; glfwGetFramebufferSize(winGUI, &wg, &hg);
-        glViewport(0, 0, wg, hg);
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
         glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         
-        glfwSwapBuffers(winGUI);
+        glfwSwapBuffers(window);
     }
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -583,13 +688,7 @@ int main(int argc, char** argv)
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
     
-    glDeleteVertexArrays(1, &vaoPts);
-    glDeleteBuffers(1, &vboPts);
-    glDeleteBuffers(1, &cboPts);
-    glDeleteProgram(progViz);
-    
-    glfwDestroyWindow(winGUI);
-    glfwDestroyWindow(win3D);
+    glfwDestroyWindow(window);
     glfwTerminate();
 
     rclcpp::shutdown();
