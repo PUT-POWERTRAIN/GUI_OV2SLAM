@@ -40,14 +40,15 @@ WORKDIR /ws/src/imgui_app/Thirdparty
 RUN git clone https://github.com/ocornut/imgui.git
 WORKDIR /ws/src/imgui_app/Thirdparty/imgui
 RUN git checkout docking
-# ImGui to header-only library, nie wymaga kompilacji
+##############
+### Logo #####
+##############
 
 ##################
 ### ImPlot     ###
 ##################
 WORKDIR /ws/src/imgui_app/Thirdparty
 RUN git clone https://github.com/epezent/implot.git
-# ImPlot również header-only
 
 ###################
 ### GLM (math)  ###
@@ -70,11 +71,21 @@ RUN apt update \
         ros-${ROS_DISTRO}-tf2 \
         ros-${ROS_DISTRO}-tf2-ros \
         ros-${ROS_DISTRO}-tf2-geometry-msgs \
-        ros-${ROS_DISTRO}-image-transport \
         ros-${ROS_DISTRO}-cv-bridge \
-        ros-${ROS_DISTRO}-pcl-ros \
-        ros-${ROS_DISTRO}-pcl-conversions \
-        ros-${ROS_DISTRO}-visualization-msgs \
+    && rm -rf /var/lib/apt/lists/*
+######################
+### Cyclone DDS    ###
+######################
+RUN apt update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    && rm -rf /var/lib/apt/lists/*
+###################
+### OpenCV      ###
+###################
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ############################
@@ -83,6 +94,11 @@ RUN apt update \
 ADD . /ws/src/imgui_app
 
 WORKDIR /ws
+
+COPY logo.png /ws/src/imgui_app/logo.png
+
+RUN mkdir -p /ws/trajectories
+
 RUN . /opt/ros/$ROS_DISTRO/setup.sh && colcon build --symlink-install
 
 # Ustaw zmienne środowiskowe dla X11
@@ -92,6 +108,10 @@ ENV QT_X11_NO_MITSHM=1
 # Source ROS setup
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> ~/.bashrc
 RUN echo "source /ws/install/setup.bash" >> ~/.bashrc
+
+# Ustaw Cyclone DDS jako domyślny
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV ROS_DOMAIN_ID=0
 
 WORKDIR /ws
 

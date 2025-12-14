@@ -15,7 +15,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
 # Znajdź OpenGL i GLFW
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
@@ -54,6 +55,7 @@ target_include_directories(imgui_visualizer PUBLIC
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${IMPLOT_DIR}
+    ${OpenCV_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -61,6 +63,7 @@ target_link_libraries(imgui_visualizer
     OpenGL::GL
     glfw
     GLEW::GLEW
+    ${OpenCV_LIBS}
 )
 
 # ROS 2 dependencies
@@ -71,6 +74,7 @@ ament_target_dependencies(imgui_visualizer
     geometry_msgs
     nav_msgs
     tf2_ros
+    cv_bridge
 )
 
 # Install executable
